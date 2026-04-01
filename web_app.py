@@ -64,8 +64,17 @@ def home():
                 text += page.extract_text()
 
             # Extract amounts like 123.45 or 1,234.56
-            amounts = re.findall(r'\\d+[,.]?\\d*\\.\\d{2}', text)
-            amounts = [float(a.replace(",", "")) for a in amounts]
+           lines = text.split("\n")
+
+amounts = []
+
+for line in lines:
+    match = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
+    for m in match:
+        try:
+            amounts.append(float(m.replace(",", "")))
+        except:
+            pass
 
             if not amounts:
                 return render_template_string(HTML, error="No transactions found")
