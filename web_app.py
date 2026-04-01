@@ -1,9 +1,7 @@
 from flask import Flask, render_template_string, request
-import pdfplumber
 import PyPDF2
 import re
 import os
-import tempfile
 
 app = Flask(__name__)
 
@@ -52,25 +50,21 @@ def home():
             return render_template_string(HTML, error="No file uploaded")
 
         try:
-            # Save temp file
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                file.save(tmp.name)
-                temp_path = tmp.name
+            reader = PyPDF2.PdfReader(file)
 
-            # Handle password using PyPDF2
-            reader = PyPDF2.PdfReader(temp_path)
-
+            # Handle password
             if reader.is_encrypted:
                 if password:
                     reader.decrypt(password)
                 else:
                     return render_template_string(HTML, error="PDF is password protected")
 
-            # Now read using pdfplumber
             text = ""
-            with pdfplumber.open(temp_path) as pdf:
-                for page in pdf.pages:
-                    text += page.extract_text() or ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+
+            if not text.strip():
+                return render_template_string(HTML, error="Unable to read PDF text")
 
             lines = text.split("\n")
 
@@ -86,16 +80,16 @@ def home():
                 for m in matches:
                     amount = float(m.replace(",", ""))
 
-                    if any(word in line_lower for word in ["paid", "sent", "debit"]):
+                    if "paid" in line_lower or "sent" in line_lower:
                         total_debit += amount
-                    elif any(word in line_lower for word in ["received", "credit"]):
+                    elif "received" in line_lower or "credit" in line_lower:
                         total_credit += amount
 
                     if amount > highest:
                         highest = amount
 
             if total_credit == 0 and total_debit == 0:
-                return render_template_string(HTML, error="Could not detect transactions")
+                return render_template_string(HTML, error="No valid transactions detected")
 
             result = {
                 "credit": round(total_credit, 2),
