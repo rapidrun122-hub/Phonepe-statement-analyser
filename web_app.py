@@ -1,73 +1,91 @@
-from flask import Flask, request, render_template_string
-import os
+from flask import Flask, render_template_string, request
+import PyPDF2
+import re
 
 app = Flask(__name__)
 
-# Simple UI (no separate HTML file needed)
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Statement Analyzer</title>
+    <title>PhonePe Statement Analyzer</title>
 </head>
-<body>
+<body style="font-family: Arial; text-align: center; margin-top: 50px;">
+
     <h2>Upload PhonePe Statement</h2>
+
     <form method="POST" enctype="multipart/form-data">
-        <input type="file" name="file" required>
+        <input type="file" name="file" required><br><br>
+
+        <input type="password" name="password" placeholder="Enter PDF Password (if any)"><br><br>
+
         <button type="submit">Analyze</button>
     </form>
 
+    <br>
+
     {% if result %}
-        <h3>Results:</h3>
-        <p>Total Credit: {{ result.credit }}</p>
-        <p>Total Debit: {{ result.debit }}</p>
-        <p>Highest Transaction: {{ result.highest }}</p>
+        <h3>Result</h3>
+        <p>Total Credit: ₹{{result.credit}}</p>
+        <p>Total Debit: ₹{{result.debit}}</p>
+        <p>Highest Transaction: ₹{{result.highest}}</p>
     {% endif %}
+
+    {% if error %}
+        <p style="color:red;">{{error}}</p>
+    {% endif %}
+
 </body>
 </html>
 """
 
 @app.route("/", methods=["GET", "POST"])
 def home():
-    result = None
-
     if request.method == "POST":
-        file = request.files["file"]
+        file = request.files.get("file")
+        password = request.form.get("password")
 
-        if file:
-            content = file.read().decode("utf-8").splitlines()
+        if not file:
+            return render_template_string(HTML, error="No file uploaded")
 
-            total_credit = 0
-            total_debit = 0
-            highest = 0
+        try:
+            reader = PyPDF2.PdfReader(file)
 
-            for line in content:
-                parts = line.split(",")
+            # Handle password
+            if reader.is_encrypted:
+                if password:
+                    reader.decrypt(password)
+                else:
+                    return render_template_string(HTML, error="PDF is password protected. Enter password.")
 
-                for item in parts:
-                    item = item.strip()
+            text = ""
 
-                    if item.replace(".", "", 1).isdigit():
-                        amount = float(item)
+            for page in reader.pages:
+                text += page.extract_text()
 
-                        if amount > highest:
-                            highest = amount
+            # Extract amounts like 123.45 or 1,234.56
+            amounts = re.findall(r'\\d+[,.]?\\d*\\.\\d{2}', text)
+            amounts = [float(a.replace(",", "")) for a in amounts]
 
-                        if "credit" in line.lower():
-                            total_credit += amount
-                        else:
-                            total_debit += amount
+            if not amounts:
+                return render_template_string(HTML, error="No transactions found")
+
+            total_credit = sum(a for a in amounts if a > 0)
+            total_debit = sum(a for a in amounts if a < 0)
+            highest = max(amounts)
 
             result = {
                 "credit": round(total_credit, 2),
-                "debit": round(total_debit, 2),
+                "debit": round(abs(total_debit), 2),
                 "highest": round(highest, 2)
             }
 
-    return render_template_string(HTML, result=result)
+            return render_template_string(HTML, result=result)
 
+        except Exception as e:
+            return render_template_string(HTML, error=str(e))
 
-# 🔥 IMPORTANT FOR RENDER
+    return render_template_string(HTML)
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)
