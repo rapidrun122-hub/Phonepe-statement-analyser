@@ -32,6 +32,9 @@ button {
     border: none;
     border-radius: 5px;
 }
+.error {
+    color: red;
+}
 </style>
 </head>
 <body>
@@ -39,9 +42,12 @@ button {
 <div class="container">
 <h2>📊 PhonePe Analyzer</h2>
 
-<form method="post" enctype="multipart/form-data">
-    <input type="file" name="file" required><br><br>
+{% if error %}
+<p class="error">{{error}}</p>
+{% endif %}
 
+<form method="post" enctype="multipart/form-data">
+    <input type="file" name="file"><br><br>
     <input type="password" name="password" placeholder="Enter PDF password (if any)"><br><br>
 
     <p style="font-size:12px;color:gray;">
@@ -70,22 +76,35 @@ button {
 @app.route("/", methods=["GET", "POST"])
 def home():
     result = None
+    error = None
 
     if request.method == "POST":
-        file = request.files["file"]
+        file = request.files.get("file")
         password = request.form.get("password")
 
-        file.save("temp.pdf")
+        # Save file
+        if file and file.filename != "":
+            file.save("temp.pdf")
 
-        # 🔓 Handle password protected PDF
-        reader = PdfReader("temp.pdf")
+        # Load PDF
+        try:
+            reader = PdfReader("temp.pdf")
+        except:
+            return render_template_string(HTML, result=None, error="Please upload a file ❌")
 
+        # Handle password
         if reader.is_encrypted:
             if not password:
-                return "This PDF is password protected ❌ Enter password"
+                return render_template_string(
+                    HTML, result=None,
+                    error="🔒 This PDF is password protected. Enter password and click Analyze"
+                )
 
             if reader.decrypt(password) == 0:
-                return "Wrong password ❌"
+                return render_template_string(
+                    HTML, result=None,
+                    error="❌ Wrong password. Try again"
+                )
 
             writer = PdfWriter()
             for page in reader.pages:
@@ -98,7 +117,7 @@ def home():
         else:
             pdf_path = "temp.pdf"
 
-        # 📄 Read PDF using fitz
+        # 🔥 SMART ANALYSIS
         total_credit = 0
         total_debit = 0
         people = {}
@@ -109,20 +128,32 @@ def home():
             lines = page.get_text().split("\\n")
 
             for i in range(len(lines)):
-                try:
-                    if "DEBIT" in lines[i]:
-                        amount = float(lines[i+1].replace("₹","").replace(",",""))
-                        name = lines[i+2].replace("Paid to","").strip()
+                line = lines[i]
 
-                        total_debit += amount
-                        people[name] = people.get(name, 0) + amount
+                if "₹" in line:
+                    try:
+                        amount = float(line.replace("₹", "").replace(",", "").strip())
 
-                    elif "CREDIT" in lines[i]:
-                        amount = float(lines[i+1].replace("₹","").replace(",",""))
-                        total_credit += amount
+                        context = ""
+                        if i > 0:
+                            context += lines[i-1].lower() + " "
+                        context += line.lower()
+                        if i < len(lines)-1:
+                            context += " " + lines[i+1].lower()
 
-                except:
-                    continue
+                        # Debit detection
+                        if any(word in context for word in ["paid", "sent", "debit", "transfer to"]):
+                            total_debit += amount
+
+                            name = lines[i-1].replace("Paid to", "").replace("Sent to", "").strip()
+                            people[name] = people.get(name, 0) + amount
+
+                        # Credit detection
+                        elif any(word in context for word in ["received", "credit", "added"]):
+                            total_credit += amount
+
+                    except:
+                        continue
 
         doc.close()
 
@@ -136,7 +167,7 @@ def home():
             "amount": round(people.get(top, 0), 2)
         }
 
-    return render_template_string(HTML, result=result)
+    return render_template_string(HTML, result=result, error=error)
 
 
 if __name__ == "__main__":
