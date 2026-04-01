@@ -73,20 +73,21 @@ def home():
             highest = 0
 
             for line in lines:
-                line_lower = line.lower()
+                amounts = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
 
-                matches = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
+                if not amounts:
+                    continue
 
-                for m in matches:
-                    amount = float(m.replace(",", ""))
+                amount = float(amounts[-1].replace(",", ""))  # take last number
 
-                    if "paid" in line_lower or "sent" in line_lower:
-                        total_debit += amount
-                    elif "received" in line_lower or "credit" in line_lower:
-                        total_credit += amount
+                # Smart detection (better than previous)
+                if "upi" in line.lower() or "txn" in line.lower() or "to" in line.lower():
+                    total_debit += amount
+                else:
+                    total_credit += amount
 
-                    if amount > highest:
-                        highest = amount
+                if amount > highest:
+                    highest = amount
 
             if total_credit == 0 and total_debit == 0:
                 return render_template_string(HTML, error="No valid transactions detected")
