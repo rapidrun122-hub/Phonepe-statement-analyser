@@ -1,7 +1,9 @@
 from flask import Flask, render_template_string, request
 import pdfplumber
+import PyPDF2
 import re
 import os
+import tempfile
 
 app = Flask(__name__)
 
@@ -44,15 +46,29 @@ HTML = """
 def home():
     if request.method == "POST":
         file = request.files.get("file")
+        password = request.form.get("password")
 
         if not file:
             return render_template_string(HTML, error="No file uploaded")
 
         try:
-            text = ""
+            # Save temp file
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                file.save(tmp.name)
+                temp_path = tmp.name
 
-            # Use pdfplumber (more accurate)
-            with pdfplumber.open(file) as pdf:
+            # Handle password using PyPDF2
+            reader = PyPDF2.PdfReader(temp_path)
+
+            if reader.is_encrypted:
+                if password:
+                    reader.decrypt(password)
+                else:
+                    return render_template_string(HTML, error="PDF is password protected")
+
+            # Now read using pdfplumber
+            text = ""
+            with pdfplumber.open(temp_path) as pdf:
                 for page in pdf.pages:
                     text += page.extract_text() or ""
 
@@ -65,26 +81,21 @@ def home():
             for line in lines:
                 line_lower = line.lower()
 
-                # Extract amount
                 matches = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
-
-                if not matches:
-                    continue
 
                 for m in matches:
                     amount = float(m.replace(",", ""))
 
-                    # Smart detection
-                    if any(word in line_lower for word in ["paid", "sent", "debit", "to"]):
+                    if any(word in line_lower for word in ["paid", "sent", "debit"]):
                         total_debit += amount
-                    elif any(word in line_lower for word in ["received", "credit", "from"]):
+                    elif any(word in line_lower for word in ["received", "credit"]):
                         total_credit += amount
 
                     if amount > highest:
                         highest = amount
 
             if total_credit == 0 and total_debit == 0:
-                return render_template_string(HTML, error="Could not detect transactions properly")
+                return render_template_string(HTML, error="Could not detect transactions")
 
             result = {
                 "credit": round(total_credit, 2),
