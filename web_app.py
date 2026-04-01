@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string, request
 import PyPDF2
 import re
+import os
 
 app = Flask(__name__)
 
@@ -51,30 +52,26 @@ def home():
         try:
             reader = PyPDF2.PdfReader(file)
 
-            # Handle password
             if reader.is_encrypted:
                 if password:
                     reader.decrypt(password)
                 else:
-                    return render_template_string(HTML, error="PDF is password protected. Enter password.")
+                    return render_template_string(HTML, error="PDF is password protected")
 
             text = ""
-
             for page in reader.pages:
-                text += page.extract_text()
+                text += page.extract_text() or ""
 
-            # Extract amounts like 123.45 or 1,234.56
-           lines = text.split("\n")
+            lines = text.split("\n")
+            amounts = []
 
-amounts = []
-
-for line in lines:
-    match = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
-    for m in match:
-        try:
-            amounts.append(float(m.replace(",", "")))
-        except:
-            pass
+            for line in lines:
+                matches = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
+                for m in matches:
+                    try:
+                        amounts.append(float(m.replace(",", "")))
+                    except:
+                        pass
 
             if not amounts:
                 return render_template_string(HTML, error="No transactions found")
@@ -95,8 +92,6 @@ for line in lines:
             return render_template_string(HTML, error=str(e))
 
     return render_template_string(HTML)
-
-import os
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
