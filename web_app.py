@@ -41,7 +41,13 @@ button {
 
 <form method="post" enctype="multipart/form-data">
     <input type="file" name="file" required><br><br>
+
     <input type="password" name="password" placeholder="Enter PDF password (if any)"><br><br>
+
+    <p style="font-size:12px;color:gray;">
+    🔒 Password is your registered PhonePe mobile number
+    </p><br>
+
     <button type="submit">Analyze</button>
 </form>
 
@@ -100,7 +106,7 @@ def home():
         doc = fitz.open(pdf_path)
 
         for page in doc:
-            lines = page.get_text().split("\n")
+            lines = page.get_text().split("\\n")
 
             for i in range(len(lines)):
                 try:
@@ -134,4 +140,4 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run()
