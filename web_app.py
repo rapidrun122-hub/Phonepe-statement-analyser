@@ -1,5 +1,5 @@
 from flask import Flask, render_template_string, request
-import PyPDF2
+import pdfplumber
 import re
 import os
 
@@ -44,45 +44,51 @@ HTML = """
 def home():
     if request.method == "POST":
         file = request.files.get("file")
-        password = request.form.get("password")
 
         if not file:
             return render_template_string(HTML, error="No file uploaded")
 
         try:
-            reader = PyPDF2.PdfReader(file)
-
-            if reader.is_encrypted:
-                if password:
-                    reader.decrypt(password)
-                else:
-                    return render_template_string(HTML, error="PDF is password protected")
-
             text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
+
+            # Use pdfplumber (more accurate)
+            with pdfplumber.open(file) as pdf:
+                for page in pdf.pages:
+                    text += page.extract_text() or ""
 
             lines = text.split("\n")
-            amounts = []
+
+            total_credit = 0
+            total_debit = 0
+            highest = 0
 
             for line in lines:
+                line_lower = line.lower()
+
+                # Extract amount
                 matches = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', line)
+
+                if not matches:
+                    continue
+
                 for m in matches:
-                    try:
-                        amounts.append(float(m.replace(",", "")))
-                    except:
-                        pass
+                    amount = float(m.replace(",", ""))
 
-            if not amounts:
-                return render_template_string(HTML, error="No transactions found")
+                    # Smart detection
+                    if any(word in line_lower for word in ["paid", "sent", "debit", "to"]):
+                        total_debit += amount
+                    elif any(word in line_lower for word in ["received", "credit", "from"]):
+                        total_credit += amount
 
-            total_credit = sum(a for a in amounts if a > 0)
-            total_debit = sum(a for a in amounts if a < 0)
-            highest = max(amounts)
+                    if amount > highest:
+                        highest = amount
+
+            if total_credit == 0 and total_debit == 0:
+                return render_template_string(HTML, error="Could not detect transactions properly")
 
             result = {
                 "credit": round(total_credit, 2),
-                "debit": round(abs(total_debit), 2),
+                "debit": round(total_debit, 2),
                 "highest": round(highest, 2)
             }
 
