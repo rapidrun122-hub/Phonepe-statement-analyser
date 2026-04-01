@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template_string
 import fitz
+from pypdf import PdfReader, PdfWriter
 
 app = Flask(__name__)
 
@@ -39,7 +40,8 @@ button {
 <h2>📊 PhonePe Analyzer</h2>
 
 <form method="post" enctype="multipart/form-data">
-    <input type="file" name="file"><br><br>
+    <input type="file" name="file" required><br><br>
+    <input type="password" name="password" placeholder="Enter PDF password (if any)"><br><br>
     <button type="submit">Analyze</button>
 </form>
 
@@ -48,9 +50,9 @@ button {
 <h3>Result</h3>
 <p>💰 Credit: {{result.credit}}</p>
 <p>💸 Debit: {{result.debit}}</p>
-<p>🔥 Spent: {{result.spent}}</p>
+<p>📉 Spent: {{result.spent}}</p>
 <p>👤 Top: {{result.person}}</p>
-<p>🏆 Amount: {{result.amount}}</p>
+<p>💵 Amount: {{result.amount}}</p>
 {% endif %}
 
 </div>
@@ -65,27 +67,51 @@ def home():
 
     if request.method == "POST":
         file = request.files["file"]
+        password = request.form.get("password")
+
         file.save("temp.pdf")
 
+        # 🔓 Handle password protected PDF
+        reader = PdfReader("temp.pdf")
+
+        if reader.is_encrypted:
+            if not password:
+                return "This PDF is password protected ❌ Enter password"
+
+            if reader.decrypt(password) == 0:
+                return "Wrong password ❌"
+
+            writer = PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
+
+            with open("unlocked.pdf", "wb") as f:
+                writer.write(f)
+
+            pdf_path = "unlocked.pdf"
+        else:
+            pdf_path = "temp.pdf"
+
+        # 📄 Read PDF using fitz
         total_credit = 0
         total_debit = 0
         people = {}
 
-        doc = fitz.open("temp.pdf")
+        doc = fitz.open(pdf_path)
 
         for page in doc:
             lines = page.get_text().split("\n")
 
             for i in range(len(lines)):
                 try:
-                    if lines[i].strip() == "DEBIT":
+                    if "DEBIT" in lines[i]:
                         amount = float(lines[i+1].replace("₹","").replace(",",""))
                         name = lines[i+2].replace("Paid to","").strip()
 
                         total_debit += amount
-                        people[name] = people.get(name,0) + amount
+                        people[name] = people.get(name, 0) + amount
 
-                    elif lines[i].strip() == "CREDIT":
+                    elif "CREDIT" in lines[i]:
                         amount = float(lines[i+1].replace("₹","").replace(",",""))
                         total_credit += amount
 
@@ -97,13 +123,15 @@ def home():
         top = max(people, key=people.get) if people else "None"
 
         result = {
-            "credit": round(total_credit,2),
-            "debit": round(total_debit,2),
-            "spent": round(total_debit,2),
+            "credit": round(total_credit, 2),
+            "debit": round(total_debit, 2),
+            "spent": round(total_debit, 2),
             "person": top,
-            "amount": round(people.get(top,0),2)
+            "amount": round(people.get(top, 0), 2)
         }
 
     return render_template_string(HTML, result=result)
 
-app.run(host="0.0.0.0", port=5000, debug=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
